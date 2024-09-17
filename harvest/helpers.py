@@ -1,8 +1,9 @@
 from enum import Enum
 import numpy as np
+from os.path import dirname, join
 
 
-class HarvestTile(Enum):
+class HarvestTile(str, Enum):
     """
     Enumerates the different types of tiles in the Harvest Game. The [value] of each enum is the
     character that represents the tile in the map.
@@ -47,7 +48,14 @@ PROBABILITY_FUNCS = {
         [0.025, 0.005, 0.001, 0.0]
     ),
     "zero": lambda neighbourhood: np.zeros_like(neighbourhood),
-    "uniform": lambda neighbourhood: np.random(*neighbourhood.shape),
+    "uniform": lambda neighbourhood: np.random.rand(*neighbourhood.shape),
 }
 
-OPENAI_API_KEY = open('.openai_key', 'r').read().strip()
+HARVEST_RULES = """
+    In a 2D grid, "@" are walls, "O" are orchard tiles, "A" are apples, and "." is land. Stepping on
+    an apple will collect it and earn the player points. Apples spawn only on orchard tiles and
+    when next to other apples. If there are no apples remaining, no more will spawn. Each turn, the
+    player can move up, down, left, or right.
+"""
+
+OPENAI_API_KEY = open(join(dirname(__file__), "../.openai_key")).read().strip()

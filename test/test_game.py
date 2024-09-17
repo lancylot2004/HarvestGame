@@ -21,7 +21,7 @@ class TestHarvestGame(unittest.TestCase):
             [HarvestTile.ORCHARD, HarvestTile.EMPTY, HarvestTile.ORCHARD],
             [HarvestTile.EMPTY, HarvestTile.ORCHARD, HarvestTile.EMPTY],
             [HarvestTile.EMPTY, HarvestTile.ORCHARD, HarvestTile.EMPTY],
-        ])
+        ], dtype = np.dtype(HarvestTile))
         self.spawn_points = [(0, 0), (0, 2), (2, 0)]
         self.game = HarvestGame(map = self.test_map, spawn_points = self.spawn_points, seed = 42)
 
@@ -46,7 +46,7 @@ class TestHarvestGame(unittest.TestCase):
         map_with_apples = np.array([
             [HarvestTile.APPLE, HarvestTile.ORCHARD],
             [HarvestTile.ORCHARD, HarvestTile.EMPTY]
-        ])
+        ], dtype = np.dtype(HarvestTile))
         with self.assertRaises(AssertionError):
             game = HarvestGame(map=map_with_apples, spawn_points=[])
 
@@ -103,7 +103,7 @@ class TestHarvestGame(unittest.TestCase):
             [HarvestTile.ORCHARD, HarvestTile.EMPTY, HarvestTile.ORCHARD],
             [HarvestTile.EMPTY, HarvestTile.ORCHARD, HarvestTile.EMPTY],
             [HarvestTile.EMPTY, HarvestTile.ORCHARD, HarvestTile.EMPTY],
-        ])
+        ], dtype = np.dtype(HarvestTile))
         np.testing.assert_array_equal(parsed_map, expected_map)
 
     def test_width(self):
@@ -127,7 +127,7 @@ class TestHarvestGame(unittest.TestCase):
         """[HarvestGame] should spawn apples in orchards correctly."""
 
         self.game.setup(2)
-        apple_count = np.sum(self.game.map == HarvestTile.APPLE)
+        apple_count = np.sum(self.game.map == HarvestTile.APPLE.value)
         self.assertEqual(apple_count, 2)
 
     def test_view_map(self):

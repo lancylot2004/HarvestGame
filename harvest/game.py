@@ -1,9 +1,11 @@
+import json
 from enum import Enum
 from threading import RLock
 from typing import Callable, Generator
 
 import numpy as np
 from scipy.ndimage import convolve
+from tqdm import tqdm
 
 from harvest.helpers import KERNEL, PROBABILITY_FUNCS, HarvestMap, HarvestTile
 from harvest.player import HarvestPlayer
@@ -40,7 +42,7 @@ class HarvestGame:
         assert map.ndim == 2, "Map must be a 2D numpy array."
         assert np.all(map != HarvestTile.APPLE), "Initial map must not contain apples."
         self.map = map
-        self.history.append({ "type": "init_map", "map": map.copy() })
+        self.history.append({ "type": "init_map", "map": np.copy(self.map).tolist() })
 
         assert len(spawn_points) > 0, "At least one spawn point must be provided."
         assert len(spawn_points) <= map.size, "Too many spawn points for map size."
@@ -75,13 +77,13 @@ class HarvestGame:
                 yield (x, y), snapshot[y][x]
 
     @staticmethod
-    def parse_map(map: list[str]) -> HarvestMap:
+    def parse_map(map_string: list[str]) -> HarvestMap:
         """Parses a list of strings into a 2D numpy array of HarvestTiles."""
 
         return np.array([
             [HarvestTile(char) for char in row]
-            for row in map
-        ])
+            for row in map_string
+        ], dtype = np.dtype(HarvestTile))
     
     @property
     def width(self) -> int:
@@ -110,12 +112,12 @@ class HarvestGame:
         assert desired_apple_num <= self.map.size, "Too many apples for map size."
 
         with self._lock:
-            orchards = np.argwhere(self.map == HarvestTile.ORCHARD)
+            orchards = np.argwhere(self.map == HarvestTile.ORCHARD.value)
             selected_indices = np.random.choice(len(orchards), size = desired_apple_num, replace = False)
             apples = orchards[selected_indices]
             self.map[apples[:, 0], apples[:, 1]] = HarvestTile.APPLE
 
-            self.history.append({ "type": "setup", "apples": apples.tolist(), "map": self.map.copy() })
+            self.history.append({ "type": "setup", "apples": apples.tolist(), "map": np.copy(self.map).tolist() })
 
     def advance(
         self,
@@ -131,7 +133,7 @@ class HarvestGame:
                 `Melting Pot 2.0, arXiv:2211.13746`.
 
         Returns:
-            np.array[tuple[int, int]]: The coordinates of new apples.
+            np.ndarray[tuple[int, int]]: The coordinates of new apples.
         """
         
         with self._lock:
@@ -146,35 +148,54 @@ class HarvestGame:
             spawns = spawns & (self.map == HarvestTile.ORCHARD)
 
             self.map[spawns] = HarvestTile.APPLE
-            spawn_coords = np.argwhere(spawns)
-            self.history.append({ "type": "advance", "new_apples": spawn_coords, "map": self.map.copy() })
+            spawn_coords = np.argwhere(spawns).tolist()
+            self.history.append({ "type": "advance", "new_apples": spawn_coords, "map": np.copy(self.map).tolist() })
             return spawn_coords
         
-    def view_map(self) -> str:
+    def view_map(self, mark: tuple[int, int] | None = None) -> str:
         """Returns a string representation of the map."""
+
+        if mark is not None:
+            assert self.in_bounds(mark)
+
         with self._lock:
-            return "\n".join("".join(repr(tile) for tile in row) for row in self.map)
+            return "\n".join(
+                "".join(
+                    '#' if mark is not None and (row_num, col_num) == mark else repr(tile)
+                    for col_num, tile in enumerate(row)
+                )
+                for row_num, row in enumerate(self.map)
+            )
     
-    def view_partial_map(self, center: tuple[int, int], radius: int) -> str:
+    def view_partial_map(
+            self, center: tuple[int, int], radius: int,
+            mark: tuple[int, int] | None = None
+    ) -> str:
         """Returns a string representation of a partial map centered around a point."""
 
         x, y = center
+        if mark is not None:
+            assert self.in_bounds(mark)
 
         with self._lock:
             start_row, start_col = max(0, y - radius), max(0, x - radius)
             end_row, end_col = min(self.height, y + radius + 1), min(self.width, x + radius + 1)
             
             return "\n".join(
-                "".join(repr(self.map[i, j]) for j in range(start_col, end_col))
+                "".join(
+                    '#' if mark is not None and (j, i) == mark else repr(self.map[i, j])
+                    for j in range(start_col, end_col)
+                )
                 for i in range(start_row, end_row)
             )
     
-    def add_player(self, name: str, sight: int = -1) -> HarvestPlayer:
+    def add_player(self, name: str, goal: str, sight: int = -1) -> HarvestPlayer:
         """
         Generates a new [HarvestPlayer] and returns it.
 
         Args:
             name (str): The name of the player.
+            goal (str): The goal for this player.
             sight (int, optional): How far this player can see. Defaults to -1, which means infinite
                 sight.
 
@@ -187,6 +208,38 @@ class HarvestGame:
 
         with self._lock:
             spawn_point = self._spawn_points[len(self.players)]
-            player = HarvestPlayer(name, self, spawn_point, sight = sight)
+            player = HarvestPlayer(name, self, spawn_point, sight = sight, goal = goal)
             self.players[name] = player
             return player
+
+    def experiment(
+            self, output_file: str | None = None,
+            probability_func: Callable[[np.ndarray[int]], np.ndarray[float]] = PROBABILITY_FUNCS["original"],
+            desired_apple_num: int | None = None, limit: int = 50
+    ) -> None:
+        """Runs this [HarvestGame] as an experiment."""
+
+        self.setup(desired_apple_num)
+        self.history.append({
+            "type": "round",
+            "num": 0,
+            "map": np.copy(self.map).tolist(),
+            "players": [it.describe() for it in self.players.values()],
+        })
+
+        for round_num in tqdm(range(1, limit + 1), desc = "Experimenting..."):
+            for player in self.players.values():
+                player: HarvestPlayer
+                player.run()
+
+            self.advance(probability_func)
+
+            self.history.append({
+                "type": "round",
+                "num": round_num,
+                "map": np.copy(self.map).tolist(),
+                "players": [it.describe() for it in self.players.values()],
+            })
+
+        with open(output_file, 'w') as f:
+            json.dump(self.history, f)
