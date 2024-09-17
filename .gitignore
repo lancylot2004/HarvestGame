@@ -1,0 +1,5 @@
+.gitsecret/keys/random_seed
+!*.secret
+.openai_key
+
+__pycache__
