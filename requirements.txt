@@ -1,0 +1,5 @@
+numpy
+gdm-concordia
+matplotlib
+scipy
+sentence_transformers
