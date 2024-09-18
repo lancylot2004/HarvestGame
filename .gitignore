@@ -3,3 +3,6 @@
 .openai_key
 
 __pycache__
+
+.vscode
+.idea

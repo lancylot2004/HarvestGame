@@ -42,7 +42,6 @@ class HarvestGame:
         assert map.ndim == 2, "Map must be a 2D numpy array."
         assert np.all(map != HarvestTile.APPLE), "Initial map must not contain apples."
         self.map = map
-        self.history.append({ "type": "init_map", "map": np.copy(self.map).tolist() })
 
         assert len(spawn_points) > 0, "At least one spawn point must be provided."
         assert len(spawn_points) <= map.size, "Too many spawn points for map size."
@@ -52,9 +51,8 @@ class HarvestGame:
 
         if seed is not None: 
             np.random.seed(seed)
-            self.history.append({ "type": "init_seed", "seed": seed })
         
-        pass
+        self.history.append({ "type": "init", "map": np.copy(self.map).tolist(), "seed": seed })
 
     def __getitem__(self, key: tuple[int, int]) -> HarvestTile:
         """Returns the tile at the given coordinates (in (x, y) form) in [self.map]."""
@@ -117,7 +115,7 @@ class HarvestGame:
             apples = orchards[selected_indices]
             self.map[apples[:, 0], apples[:, 1]] = HarvestTile.APPLE
 
-            self.history.append({ "type": "setup", "apples": apples.tolist(), "map": np.copy(self.map).tolist() })
+            self.history.append({ "type": "setup_map", "apples": apples.tolist(), "map": np.copy(self.map).tolist() })
 
     def advance(
         self,
