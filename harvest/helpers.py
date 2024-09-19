@@ -51,11 +51,4 @@ PROBABILITY_FUNCS = {
     "uniform": lambda neighbourhood: np.random.rand(*neighbourhood.shape),
 }
 
-HARVEST_RULES = """
-    In a 2D grid, "@" are walls, "O" are orchard tiles, "A" are apples, and "." is land. Stepping on
-    an apple will collect it and earn the player points. Apples spawn only on orchard tiles and
-    when next to other apples. If there are no apples remaining, no more will spawn. Each turn, the
-    player can move up, down, left, or right.
-"""
-
 OPENAI_API_KEY = open(join(dirname(__file__), "../.openai_key")).read().strip()
