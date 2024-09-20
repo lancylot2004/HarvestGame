@@ -34,7 +34,7 @@ class HarvestPlayer:
         self.score = score
         self.sight = sight
 
-        self._messages = [
+        self._base_messages = [
             {
                 "role": "system",
                 "content": f"""
@@ -58,6 +58,7 @@ class HarvestPlayer:
             },
             { "role": "system", "content": f"Your goal is: {goal}"}
         ]
+        self._messages = []
 
         self._model = OpenAI(api_key = OPENAI_API_KEY)
     
@@ -72,6 +73,7 @@ class HarvestPlayer:
         max_tokens = min(max_tokens, 4096)
 
         self._messages.append({ "role": "user", "content": prompt })
+
         response = self._model.chat.completions.create(
             model = "gpt-3.5-turbo-0125",
             messages = self._messages,
@@ -82,6 +84,9 @@ class HarvestPlayer:
         )
 
         return response.choices[0].message.content
+    
+    def _reset_messages(self) -> None:
+        self._messages = self._base_messages.copy()
 
     @staticmethod
     def _extract_path(path: str) -> list[tuple[int, int]]:
@@ -178,6 +183,7 @@ class HarvestPlayer:
             break
 
         self._execute(path[1:])
+        self._reset_messages()
 
     def describe(self):
         """Describe the location and score of this player."""
