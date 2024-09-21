@@ -136,14 +136,14 @@ class HarvestGame:
         
         with self._lock:
             neighborhood = convolve(
-                (self.map == HarvestTile.APPLE).astype(int), KERNEL,
+                (self.map == 'A').astype(int), KERNEL,
                 mode = 'constant', cval = 0
             )
 
             probabilities = probability_func(neighborhood)
 
             spawns = np.random.random(self.map.shape) < probabilities
-            spawns = spawns & (self.map == HarvestTile.ORCHARD)
+            spawns = spawns & (self.map == 'O')
 
             self.map[spawns] = HarvestTile.APPLE
             spawn_coords = np.argwhere(spawns).tolist()
