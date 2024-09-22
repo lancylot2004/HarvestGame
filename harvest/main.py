@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Optional
 
 import numpy as np
 from openai import OpenAI
@@ -17,6 +17,7 @@ def execute_experiment(
     probability_func: Callable[[np.ndarray[int]], np.ndarray[float]],
     desired_apple_num: int,
     round_limit: int,
+    feedback_file: Optional[str] = None
 ) -> None:
     """Executes a simple [HarvestGame] experiment.
 
@@ -31,6 +32,8 @@ def execute_experiment(
             for advancing the map between rounds.
         desired_apple_num (int): The desired number of apples at the beginning.
         round_limit (int): The number of rounds to run the experiment for.
+        feedback_file (Optional[str]): The feedback file to use. If specified, the feedback content
+            will be given to all agents as part of their system instructions.
     """
 
     game = HarvestGame(
@@ -39,8 +42,19 @@ def execute_experiment(
         seed = seed,
     )
 
+    feedback = None
+    if feedback_file is not None:
+        with open(feedback_file, "r") as file:
+            data = json.load(file)
+            analysis = data.get("analysis")
+            if isinstance(analysis, list) and len(analysis) == player_num:
+                feedback = analysis
+            else:
+                raise ValueError(f"Invalid feedback file: analysis must be a list of length {player_num}")
+
     for i in range(player_num):
-        game.add_player(str(i), player_goal)
+        player_feedback = feedback[i] if feedback else None
+        game.add_player(str(i), goal = player_goal, feedback = player_feedback)
 
     game.experiment(
         output_file = output_file, 
@@ -68,13 +82,11 @@ def extract_history(log_file: str) -> list[tuple[str, str, str, int]]:
 
         return history
 
-PREFIX = "You will be given a list of (AGENT, OBSERVATION, ACTION, REWARD) quadruples collected from 4 agents playing the Harvest game. Each OBSERVATION is a list of coordinates of apples that the AGENT can see, and each ACTION describes the ACTION of that AGENT performed given OBSERVATION. ACTIONs are in the form '(x, y) -> (u, v)', indicating movement from '(x,y)' to '(u,v)'. The trajectories are separated into HIGH REWARD and LOW REWARD examples."
-
-SUFFIX = "Output 4 language instruction that best summarise the strategies that each AGENT should follow to receive HIGH REWARD, not LOW REWARD, base on the above trajectories. You should output an instruction for each of the agents, each starting with the prefix 'AGENT should'." 
-
 def execute_analysis(
     high_reward_log_files: list[str],
     low_reward_log_files: list[str],
+    output_file: str,
+    num_agents: int,
 ) -> None:
     assert len(high_reward_log_files) > 0, "Must have at least one HIGH REWARD history!"
     assert len(low_reward_log_files) > 0, "Must have at least one LOW REWARD history!"
@@ -84,15 +96,30 @@ def execute_analysis(
 
     _backslash = "\n"
     _prompt = f"""
-        {PREFIX}
+        You will be given a list of (AGENT, OBSERVATION, ACTION, REWARD) quadruples collected from 
+        {num_agents} agents playing the Harvest game. Each OBSERVATION is a list of coordinates of apples that 
+        the AGENT can see, and each ACTION describes the ACTION of that AGENT performed given 
+        OBSERVATION. ACTIONs are in the form '(x, y) -> (u, v)', indicating movement from '(x,y)' 
+        to '(u,v)'. The trajectories are separated into HIGH REWARD and LOW REWARD examples.
 
         HIGH REWARD trajectories
         {_backslash.join(f"Number {index}, {trajectory}" for index, trajectory in enumerate(high_reward_histories))}
 
         LOW REWARD trajectories
-        {_backslash.join(f"Number {index}, {trajectory}" for index, trajectory in enumerate(high_reward_histories))}
+        {_backslash.join(f"Number {index}, {trajectory}" for index, trajectory in enumerate(low_reward_histories))}
 
-        {SUFFIX}
+        Output exactly {num_agents} language instructions that best summarise the strategies that each AGENT should 
+        follow to receive HIGH REWARD, not LOW REWARD, based on the above trajectories. You should 
+        output an instruction for each of the agents, each starting with the prefix 'AGENT should'.
+
+        Use the following format, with each instruction separated by '---INSTRUCTION---':
+        AGENT should [instruction 1]
+        ---INSTRUCTION---
+        AGENT should [instruction 2]
+        ---INSTRUCTION---
+        ...
+        ---INSTRUCTION---
+        AGENT should [instruction {num_agents}]
     """.strip()
 
     _model = OpenAI(api_key = OPENAI_API_KEY)
@@ -119,9 +146,25 @@ def execute_analysis(
         max_tokens = 1024,
         timeout = 5,
         stop = (),
-    )
+    ).choices[0].message.content
 
-    print(response.choices[0].message.content)
+    # Split the response into individual instructions
+    instructions = response.split("---INSTRUCTION---")
+    instructions = [instr.strip() for instr in instructions if instr.strip()]
+
+    # Ensure we have the correct number of instructions
+    if len(instructions) != num_agents:
+        raise ValueError(f"Expected {num_agents} instructions, but got {len(instructions)}")
+
+    with open(output_file, "w") as file:
+        json.dump(
+            { 
+                "high_reward_log_files": high_reward_log_files,
+                "low_reward_log_files": low_reward_log_files,
+                "analysis": instructions
+            },
+            file
+        )
 
 
 if __name__ == "__main__":
@@ -138,13 +181,16 @@ if __name__ == "__main__":
         seed = ord('A'),
         player_num = 4,
         player_goal = "To maximise your own points.",
-        output_file = "expts/4-4x8MO-Original-12-A-1.json", 
+        output_file = "expts/4-4x8MO-Original-12-A-5.json", 
         probability_func = PROBABILITY_FUNCS["original"], 
         desired_apple_num = 12, 
-        round_limit = 50
+        round_limit = 50,
+        feedback_file = "expts/Analysis-1.json"
     )
 
     # execute_analysis(
-    #     ["expts/4-4x8MO-Original-12-B-1.json"],
-    #     ["expts/4-4x8MO-Original-12-B-2.json"]
+    #     ["expts/4-4x8MO-Original-12-A-2.json"],
+    #     ["expts/4-4x8MO-Original-12-A-1.json"],
+    #     "expts/Analysis-1.json",
+    #     num_agents=4
     # )

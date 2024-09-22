@@ -1,7 +1,7 @@
 import json
 from enum import Enum
 from threading import RLock
-from typing import Callable, Generator
+from typing import Callable, Generator, Optional
 
 import numpy as np
 from scipy.ndimage import convolve
@@ -166,8 +166,8 @@ class HarvestGame:
             )
     
     def view_partial_map(
-            self, center: tuple[int, int], radius: int,
-            mark: tuple[int, int] | None = None
+        self, center: tuple[int, int], radius: int,
+        mark: tuple[int, int] | None = None
     ) -> str:
         """Returns a string representation of a partial map centered around a point."""
 
@@ -187,7 +187,7 @@ class HarvestGame:
                 for i in range(start_row, end_row)
             )
     
-    def add_player(self, name: str, goal: str, sight: int = -1) -> HarvestPlayer:
+    def add_player(self, name: str, goal: str, sight: int = -1, feedback: Optional[str] = None) -> HarvestPlayer:
         """
         Generates a new [HarvestPlayer] and returns it.
 
@@ -196,6 +196,7 @@ class HarvestGame:
             goal (str): The goal for this player.
             sight (int, optional): How far this player can see. Defaults to -1, which means infinite
                 sight.
+            feedback (str): Freetext feedback that this player should be given.
 
         Returns:
             HarvestPlayer: The newly created player.
@@ -206,7 +207,7 @@ class HarvestGame:
 
         with self._lock:
             spawn_point = self._spawn_points[len(self.players)]
-            player = HarvestPlayer(name, self, spawn_point, sight = sight, goal = goal)
+            player = HarvestPlayer(name, self, spawn_point, sight = sight, goal = goal, feedback = feedback)
             self.players[name] = player
             return player
 

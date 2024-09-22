@@ -1,5 +1,5 @@
 import re
-from typing import Collection
+from typing import Collection, Optional
 
 from openai import OpenAI
 
@@ -25,6 +25,7 @@ class HarvestPlayer:
         position: tuple[int, int],
         score: int = 0,
         sight: int = -1,
+        feedback: Optional[str] = None,
         goal: str = "To maximise your own points."
     ) -> None:
         assert len(name) == 1, "Player name must be a single character."
@@ -56,8 +57,14 @@ class HarvestPlayer:
                     "(x, y)", where the origin of the map is the top-left corner.
                 """
             },
-            { "role": "system", "content": f"Your goal is: {goal}"}
+            { "role": "system", "content": f"Your goal is: {goal}" },
         ]
+        if feedback is not None:
+            self._base_messages.append({ 
+                "role": "system", 
+                "content": f"To improve your performance, adhere to this advice: \"{feedback}\"" 
+            })
+
         self._messages = []
 
         self._model = OpenAI(api_key = OPENAI_API_KEY)
@@ -143,10 +150,10 @@ class HarvestPlayer:
 
         # Report other players' locations and scores.
         prompt += '\n'.join([
-                f"{player.name}: {player.position}, with {player.score} points."
-                for player in self.game.players.values()
-                if player.name != self.name
-            ]) + '\n'
+            f"{player.name}: {player.position}, with {player.score} points."
+            for player in self.game.players.values()
+            if player.name != self.name
+        ]) + '\n'
 
         # Report apples.
         # TODO: Don't report apples out of sight.
@@ -154,8 +161,8 @@ class HarvestPlayer:
 
         # Report the map.
         map_snapshot = self.game.view_map(self.position) \
-            if self.sight == -1 else (
-            self.game.partial_view(self.position, self.sight, self.position))
+            if self.sight == -1 else \
+            self.game.view_partial_map(self.position, self.sight, self.position)
         prompt += f"Here is the map: \n{map_snapshot}\n"
 
         prompt += f"Where will you, player {self.name}, move next?"
