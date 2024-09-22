@@ -26,7 +26,8 @@ class HarvestPlayer:
         score: int = 0,
         sight: int = -1,
         feedback: Optional[str] = None,
-        goal: str = "To maximise your own points."
+        goal: str = "To maximise your own points.",
+        temperature: float = 0.5,
     ) -> None:
         assert len(name) == 1, "Player name must be a single character."
         self.name = name
@@ -34,6 +35,7 @@ class HarvestPlayer:
         self.position = position
         self.score = score
         self.sight = sight
+        self._temperature = temperature
 
         self._base_messages = [
             {
@@ -74,7 +76,6 @@ class HarvestPlayer:
         prompt: str,
         max_tokens: int = 256,
         terminators: Collection[str] = (),
-        temperature: float = 0.5,
         timeout: float = 5,
     ) -> str:
         max_tokens = min(max_tokens, 4096)
@@ -84,7 +85,7 @@ class HarvestPlayer:
         response = self._model.chat.completions.create(
             model = "gpt-3.5-turbo-0125",
             messages = self._messages,
-            temperature = temperature,
+            temperature = self._temperature,
             max_tokens=max_tokens,
             timeout = timeout,
             stop = terminators,

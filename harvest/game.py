@@ -187,7 +187,7 @@ class HarvestGame:
                 for i in range(start_row, end_row)
             )
     
-    def add_player(self, name: str, goal: str, sight: int = -1, feedback: Optional[str] = None) -> HarvestPlayer:
+    def add_player(self, name: str, goal: str, sight: int = -1, feedback: Optional[str] = None, temperature: float = 0.5) -> HarvestPlayer:
         """
         Generates a new [HarvestPlayer] and returns it.
 
@@ -207,7 +207,7 @@ class HarvestGame:
 
         with self._lock:
             spawn_point = self._spawn_points[len(self.players)]
-            player = HarvestPlayer(name, self, spawn_point, sight = sight, goal = goal, feedback = feedback)
+            player = HarvestPlayer(name, self, spawn_point, sight = sight, goal = goal, feedback = feedback, temperature = temperature)
             self.players[name] = player
             return player
 

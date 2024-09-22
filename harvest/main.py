@@ -17,7 +17,8 @@ def execute_experiment(
     probability_func: Callable[[np.ndarray[int]], np.ndarray[float]],
     desired_apple_num: int,
     round_limit: int,
-    feedback_file: Optional[str] = None
+    feedback_file: Optional[str] = None,
+    temperature: float = 0.5,
 ) -> None:
     """Executes a simple [HarvestGame] experiment.
 
@@ -54,7 +55,7 @@ def execute_experiment(
 
     for i in range(player_num):
         player_feedback = feedback[i] if feedback else None
-        game.add_player(str(i), goal = player_goal, feedback = player_feedback)
+        game.add_player(str(i), goal = player_goal, feedback = player_feedback, temperature = temperature)
 
     game.experiment(
         output_file = output_file, 
@@ -181,11 +182,12 @@ if __name__ == "__main__":
         seed = ord('A'),
         player_num = 4,
         player_goal = "To maximise your own points.",
-        output_file = "expts/4-4x8MO-Original-12-A-5.json", 
+        output_file = "expts/4-4x8MO-Original-12-A-F0.7-2.json", 
         probability_func = PROBABILITY_FUNCS["original"], 
         desired_apple_num = 12, 
         round_limit = 50,
-        feedback_file = "expts/Analysis-1.json"
+        feedback_file = "expts/Analysis-1.json",
+        temperature = 0.7
     )
 
     # execute_analysis(
