@@ -64,30 +64,64 @@ def execute_experiment(
         limit = round_limit
     )
 
-def extract_history(log_file: str) -> list[tuple[str, str, str, int]]:
+def extract_history(log_file: str) -> dict:
+    """Extracts the history from a log file.
+
+    Args:
+        log_file (str): The file to read. This should be in the form of a list of JSON objects.
+
+    Returns:
+        dict: The list of quadruples (AGENT, OBSERVATION, ACTION, REWARD) extracted (property 
+            "history"), the number of agents (property "num_agents"), and the final total score
+            (property "total_score").
+    """
     history = []
+    num_agents = 0
+    
     with open(log_file, 'r') as file:
         data = json.load(file)
-
+        
+        # Determine `num_agents`. We assume that it would be correct to just read the first "round"
+        # object from the file.
         for obj in data:
-            match obj["type"]:
-                case "round": round_map = obj["map"]
-                case "move":
-                    history.append({
-                        "AGENT": obj["player"], 
-                        "OBSERVATION": [(j, i) for i, row in enumerate(round_map) for j, tile in enumerate(row) if tile == "A"], 
-                        "ACTION": f"{obj['from']} -> {obj['to']}", 
-                        "REWARD": 1 if obj["ate"] else 0
-                    })
-                case _: continue
+            if obj["type"] == "round":
+                num_agents = len(obj["players"])
+                break
+        
+        assert num_agents > 0, "Could not determine the number of agents"
 
-        return history
+        # Extract all agent actions into the desired format.
+        round_map = None
+        for obj in data:
+            if obj["type"] == "round":
+                round_map = obj["map"]
+            elif obj["type"] == "move":
+                history.append({
+                    "AGENT": obj["player"],
+                    "OBSERVATION": [(j, i) for i, row in enumerate(round_map) for j, tile in enumerate(row) if tile == "A"],
+                    "ACTION": f"{obj['from']} -> {obj['to']}",
+                    "REWARD": 1 if obj["ate"] else 0
+                })
+
+        # Calculate `total_score` from the last "round" object
+        for obj in reversed(data):
+            if obj["type"] == "round":
+                assert len(obj["players"]) == num_agents, "Mismatch in number of agents"
+                total_score = sum(player["score"] for player in obj["players"])
+                break
+        
+        assert total_score is not None, "Could not determine the total score."
+
+        return {
+            "history": history,
+            "num_agents": num_agents,
+            "total_score": total_score
+        }
 
 def execute_analysis(
     high_reward_log_files: list[str],
     low_reward_log_files: list[str],
     output_file: str,
-    num_agents: int,
 ) -> None:
     assert len(high_reward_log_files) > 0, "Must have at least one HIGH REWARD history!"
     assert len(low_reward_log_files) > 0, "Must have at least one LOW REWARD history!"
@@ -95,32 +129,28 @@ def execute_analysis(
     high_reward_histories = list(map(extract_history, high_reward_log_files))
     low_reward_histories = list(map(extract_history, low_reward_log_files))
 
+    num_agents = set([history["num_agents"] for history in [*high_reward_histories, *low_reward_histories]])
+    assert len(num_agents) == 1, "Histories have differing agent numbers!"
+    num_agents = list(num_agents)[0]
+
     _backslash = "\n"
     _prompt = f"""
-        You will be given a list of (AGENT, OBSERVATION, ACTION, REWARD) quadruples collected from 
-        {num_agents} agents playing the Harvest game. Each OBSERVATION is a list of coordinates of apples that 
-        the AGENT can see, and each ACTION describes the ACTION of that AGENT performed given 
-        OBSERVATION. ACTIONs are in the form '(x, y) -> (u, v)', indicating movement from '(x,y)' 
-        to '(u,v)'. The trajectories are separated into HIGH REWARD and LOW REWARD examples.
+        You will be given a list of (AGENT, OBSERVATION, ACTION, REWARD) quadruples collected from {num_agents} agents playing the Harvest game. Each OBSERVATION is a list of coordinates of apples that the AGENT can see, and each ACTION describes the ACTION of that AGENT performed given OBSERVATION. ACTIONs are in the form '(x, y) -> (u, v)', indicating movement from '(x,y)' to '(u,v)'. The trajectories are separated into RESPAWNING and NON-RESPAWNING examples, where apples respawn and do not respawn respectively.    
+    
+        RESPAWNING trajectories
+        {_backslash.join(f"Number {index}, TOTAL REWARD {trajectory["total_score"]}, {trajectory}" for index, trajectory in enumerate(high_reward_histories))}
 
-        HIGH REWARD trajectories
-        {_backslash.join(f"Number {index}, {trajectory}" for index, trajectory in enumerate(high_reward_histories))}
+        NON-RESPAWNING trajectories
+        {_backslash.join(f"Number {index}, TOTAL REWARD {trajectory["total_score"]}, {trajectory}" for index, trajectory in enumerate(low_reward_histories))}
 
-        LOW REWARD trajectories
-        {_backslash.join(f"Number {index}, {trajectory}" for index, trajectory in enumerate(low_reward_histories))}
-
-        Output exactly {num_agents} language instructions that best summarise the strategies that each AGENT should 
-        follow to receive HIGH REWARD, not LOW REWARD, based on the above trajectories. You should 
-        output an instruction for each of the agents, each starting with the prefix 'AGENT should'.
+        Define TOTAL REWARD as the summation of all the agents' reward. Output exactly {num_agents} language instructions that best summarise the strategies that each AGENT should follow to receive HIGH TOTAL REWARD in the RESPAWNING setting, not LOW TOTAL REWARD. Agents should prioritise HIGH TOTAL REWARD and NOT HIGH INDIVIDUAL REWARD. Your instructions should assume agents are in a RESPAWNING situation, where apples respawn according to the rules of the game.
 
         Use the following format, with each instruction separated by '---INSTRUCTION---':
-        AGENT should [instruction 1]
-        ---INSTRUCTION---
-        AGENT should [instruction 2]
+        AGENT 1 should [instruction 1]
         ---INSTRUCTION---
         ...
         ---INSTRUCTION---
-        AGENT should [instruction {num_agents}]
+        AGENT {num_agents} should [instruction {num_agents}]
     """.strip()
 
     _model = OpenAI(api_key = OPENAI_API_KEY)
@@ -134,7 +164,7 @@ def execute_analysis(
                 "." is land. Stepping on an apple will collect it and earn you points. Apples spawn 
                 only on orchard tiles and when next to other apples. If there are no apples 
                 remaining, no more will spawn. 
-            """
+            """.strip()
         },
         { "role": "system", "content": "Answer the user's question." },
         { "role": "user", "content": _prompt }
@@ -156,43 +186,75 @@ def execute_analysis(
     # Ensure we have the correct number of instructions
     if len(instructions) != num_agents:
         raise ValueError(f"Expected {num_agents} instructions, but got {len(instructions)}")
+    
+    # LLM should know about its previous response
+    _messages.append({ "role": "assistant", "content": response })
+    _messages.append({
+        "role": "user",
+        "content": f"""
+            For each of the instructions you provided, explain why you came up with that instruction.
+            
+            Use the following format, with each instruction separated by '---EXPLANATION---':
+            AGENT 1 should follow my instruction because [explanation 1]
+            ---EXPLANATION---
+            ...
+            ---EXPLANATION---
+            AGENT {num_agents} should follow my instruction because [explanation {num_agents}]
+        """.strip()
+    })
+
+    response = _model.chat.completions.create(
+        model = "gpt-4o-mini-2024-07-18",
+        messages = _messages,
+        temperature = 0.5,
+        max_tokens = 1024,
+        timeout = 10,
+        stop = (),
+    ).choices[0].message.content
+
+    # Split the response into individual explanations
+    explanations = response.split("---EXPLANATION---")
+    explanations = [expl.strip() for expl in explanations if expl.strip()]
+
+    # Ensure we have the correct number of explanations
+    if len(explanations) != num_agents:
+        raise ValueError(f"Expected {num_agents} explanations, but got {len(explanations)}")
 
     with open(output_file, "w") as file:
         json.dump(
             { 
                 "high_reward_log_files": high_reward_log_files,
                 "low_reward_log_files": low_reward_log_files,
-                "analysis": instructions
+                "analysis": instructions,
+                "explanations": explanations
             },
             file
         )
 
 
 if __name__ == "__main__":
-    execute_experiment(
-        map = HarvestGame.parse_map([
-            "@@@@@@@@@@",
-            "@.OO.OOOO@",
-            "@OOOOOOOO@",
-            "@OOOOOOOO@",
-            "@.OO.OOOO@",
-            "@@@@@@@@@@",
-        ]),
-        spawn_points = [(1, 1), (1, 4), (4, 1), (4, 4)],
-        seed = ord('A'),
-        player_num = 4,
-        player_goal = "To maximise your own points.",
-        output_file = "expts/4-4x8MO-Original-12-A-F0.7-2.json", 
-        probability_func = PROBABILITY_FUNCS["original"], 
-        desired_apple_num = 12, 
-        round_limit = 50,
-        feedback_file = "expts/Analysis-1.json",
-        temperature = 0.7
-    )
-
-    # execute_analysis(
-    #     ["expts/4-4x8MO-Original-12-A-2.json"],
-    #     ["expts/4-4x8MO-Original-12-A-1.json"],
-    #     "expts/Analysis-1.json",
-    #     num_agents=4
+    # execute_experiment(
+    #     map = HarvestGame.parse_map([
+    #         "@@@@@@@@@@",
+    #         "@.OO.OOOO@",
+    #         "@OOOOOOOO@",
+    #         "@OOOOOOOO@",
+    #         "@.OO.OOOO@",
+    #         "@@@@@@@@@@",
+    #     ]),
+    #     spawn_points = [(1, 1), (1, 4), (4, 1), (4, 4)],
+    #     seed = ord('A'),
+    #     player_num = 4,
+    #     player_goal = "To maximise your own points.",
+    #     output_file = "expts/4-4x8MO-Original-12-A-F4.json", 
+    #     probability_func = PROBABILITY_FUNCS["original"], 
+    #     desired_apple_num = 12, 
+    #     round_limit = 50,
+    #     feedback_file = "expts/Analysis-4.json"
     # )
+
+    execute_analysis(
+        ["expts/4-4x8MO-Original-12-A-2.json"],
+        ["expts/4-4x8MO-Original-12-A-F0.9-2.json"],
+        "expts/Analysis-5.json",
+    )
