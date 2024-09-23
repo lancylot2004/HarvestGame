@@ -1,3 +1,4 @@
+from textwrap import dedent
 from typing import Callable, Optional
 
 import numpy as np
@@ -75,7 +76,7 @@ def extract_history(log_file: str) -> dict:
             "history"), the number of agents (property "num_agents"), and the final total score
             (property "total_score").
     """
-    history = []
+    trajectory = []
     num_agents = 0
     
     with open(log_file, 'r') as file:
@@ -96,7 +97,7 @@ def extract_history(log_file: str) -> dict:
             if obj["type"] == "round":
                 round_map = obj["map"]
             elif obj["type"] == "move":
-                history.append({
+                trajectory.append({
                     "AGENT": obj["player"],
                     "OBSERVATION": [(j, i) for i, row in enumerate(round_map) for j, tile in enumerate(row) if tile == "A"],
                     "ACTION": f"{obj['from']} -> {obj['to']}",
@@ -113,45 +114,44 @@ def extract_history(log_file: str) -> dict:
         assert total_score is not None, "Could not determine the total score."
 
         return {
-            "history": history,
+            "trajectory": trajectory,
             "num_agents": num_agents,
             "total_score": total_score
         }
 
 def execute_analysis(
-    high_reward_log_files: list[str],
-    low_reward_log_files: list[str],
+    log_files_set_1: list[str],
+    log_files_set_2: list[str],
+    prompt: str,
     output_file: str,
 ) -> None:
-    assert len(high_reward_log_files) > 0, "Must have at least one HIGH REWARD history!"
-    assert len(low_reward_log_files) > 0, "Must have at least one LOW REWARD history!"
+    """
+    Executes an analysis experiment.
 
-    high_reward_histories = list(map(extract_history, high_reward_log_files))
-    low_reward_histories = list(map(extract_history, low_reward_log_files))
+    Args:
+        log_files_set_1 (list[str]): The list of log files for the high reward history.
+        log_files_set_2 (list[str]): The list of log files for the low reward history.
+        prompt (str): The prompt to be used for the analysis. Variables {num_agents}, 
+            {trajectories_set_1}, and {trajectories_set_2} will be provided.
+        output_file (str): The file to output the analysis to.
+    """
 
-    num_agents = set([history["num_agents"] for history in [*high_reward_histories, *low_reward_histories]])
+    assert len(log_files_set_1) > 0, "Must have at least one HIGH REWARD history!"
+    assert len(log_files_set_2) > 0, "Must have at least one LOW REWARD history!"
+
+    histories_set_1 = list(map(extract_history, log_files_set_1))
+    histories_set_2 = list(map(extract_history, log_files_set_2))
+
+    num_agents = set([history["num_agents"] for history in [*histories_set_1, *histories_set_2]])
     assert len(num_agents) == 1, "Histories have differing agent numbers!"
     num_agents = list(num_agents)[0]
 
     _backslash = "\n"
-    _prompt = f"""
-        You will be given a list of (AGENT, OBSERVATION, ACTION, REWARD) quadruples collected from {num_agents} agents playing the Harvest game. Each OBSERVATION is a list of coordinates of apples that the AGENT can see, and each ACTION describes the ACTION of that AGENT performed given OBSERVATION. ACTIONs are in the form '(x, y) -> (u, v)', indicating movement from '(x,y)' to '(u,v)'. The trajectories are separated into RESPAWNING and NON-RESPAWNING examples, where apples respawn and do not respawn respectively.    
-    
-        RESPAWNING trajectories
-        {_backslash.join(f"Number {index}, TOTAL REWARD {trajectory["total_score"]}, {trajectory}" for index, trajectory in enumerate(high_reward_histories))}
-
-        NON-RESPAWNING trajectories
-        {_backslash.join(f"Number {index}, TOTAL REWARD {trajectory["total_score"]}, {trajectory}" for index, trajectory in enumerate(low_reward_histories))}
-
-        Define TOTAL REWARD as the summation of all the agents' reward. Output exactly {num_agents} language instructions that best summarise the strategies that each AGENT should follow to receive HIGH TOTAL REWARD in the RESPAWNING setting, not LOW TOTAL REWARD. Agents should prioritise HIGH TOTAL REWARD and NOT HIGH INDIVIDUAL REWARD. Your instructions should assume agents are in a RESPAWNING situation, where apples respawn according to the rules of the game.
-
-        Use the following format, with each instruction separated by '---INSTRUCTION---':
-        AGENT 1 should [instruction 1]
-        ---INSTRUCTION---
-        ...
-        ---INSTRUCTION---
-        AGENT {num_agents} should [instruction {num_agents}]
-    """.strip()
+    _prompt = dedent(prompt).format(
+        num_agents = num_agents,
+        trajectories_set_1 = {_backslash.join(f"Number {index}, TOTAL REWARD {trajectory["total_score"]}, {trajectory}" for index, trajectory in enumerate(histories_set_1))},
+        trajectories_set_2 = {_backslash.join(f"Number {index}, TOTAL REWARD {trajectory["total_score"]}, {trajectory}" for index, trajectory in enumerate(histories_set_2))}
+    )
 
     _model = OpenAI(api_key = OPENAI_API_KEY)
 
@@ -223,10 +223,12 @@ def execute_analysis(
     with open(output_file, "w") as file:
         json.dump(
             { 
-                "high_reward_log_files": high_reward_log_files,
-                "low_reward_log_files": low_reward_log_files,
+                "log_files_set_1": log_files_set_1,
+                "log_files_set_2": log_files_set_2,
+                "prompt": prompt,
                 "analysis": instructions,
-                "explanations": explanations
+                "explanations": explanations,
+                "messages": _messages + [{ "role": "assistant", "content": explanations }]
             },
             file
         )
@@ -254,7 +256,38 @@ if __name__ == "__main__":
     # )
 
     execute_analysis(
-        ["expts/4-4x8MO-Original-12-A-2.json"],
-        ["expts/4-4x8MO-Original-12-A-F0.9-2.json"],
-        "expts/Analysis-5.json",
+        log_files_set_1 = ["expts/4-4x8MO-Original-12-A-2.json"],
+        log_files_set_2 = ["expts/4-4x8MO-Original-12-A-F0.9-2.json"],
+        prompt = """
+            You will be given a list of (AGENT, OBSERVATION, ACTION, REWARD) quadruples collected 
+            from {num_agents} agents playing the Harvest game. Each OBSERVATION is a list of 
+            coordinates of apples that the AGENT can see, and each ACTION describes the ACTION of 
+            that AGENT performed given OBSERVATION. ACTIONs are in the form '(x, y) -> (u, v)', 
+            indicating movement from '(x,y)' to '(u,v)'. The trajectories are separated into 
+            RESPAWNING and NON-RESPAWNING examples, where apples respawn and do not respawn 
+            respectively.    
+        
+            RESPAWNING trajectories
+            {trajectories_set_1}
+
+            NON-RESPAWNING trajectories
+            {trajectories_set_2}
+
+            Define TOTAL REWARD as the summation of all the agents' reward. Output exactly 
+            {num_agents} language instructions that best summarise the strategies that each AGENT 
+            should follow to receive HIGH TOTAL REWARD in the RESPAWNING setting, not LOW TOTAL 
+            REWARD. Agents should prioritise HIGH TOTAL REWARD and NOT HIGH INDIVIDUAL REWARD. You 
+            should compare the TOTAL REWARD differences between the RESPAWN trajectories and 
+            NON-RESPAWNING trajectories, and analyzing the effect of respawning rule to the TOTAL 
+            REWARD. Your instructions should assume agents are in a RESPAWNING situation, where 
+            apples respawn according to the rules of the game.
+
+            Use the following format, with each instruction separated by '---INSTRUCTION---':
+            AGENT 1 should [instruction 1]
+            ---INSTRUCTION---
+            ...
+            ---INSTRUCTION---
+            AGENT {num_agents} should [instruction {num_agents}]
+        """.strip(),
+        output_file = "expts/Analysis-6.json",
     )
