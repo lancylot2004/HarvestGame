@@ -47,6 +47,20 @@ PROBABILITY_FUNCS = {
         ],
         [0.025, 0.005, 0.001, 0.0]
     ),
+    "reduced": lambda neighbourhood: np.select(
+        [
+            neighbourhood >= 3, neighbourhood == 2,
+            neighbourhood == 1, neighbourhood == 0,
+        ],
+        [0.015, 0.003, 0.0006, 0.0]
+    ),
+    "increased": lambda neighbourhood: np.select(
+        [
+            neighbourhood >= 3, neighbourhood == 2,
+            neighbourhood == 1, neighbourhood == 0,
+        ],
+        [0.015, 0.003, 0.0006, 0.0]
+    ),
     "zero": lambda neighbourhood: np.zeros_like(neighbourhood),
     "uniform": lambda neighbourhood: np.random.rand(*neighbourhood.shape),
 }

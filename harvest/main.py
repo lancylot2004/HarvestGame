@@ -132,7 +132,8 @@ def execute_analysis(
         log_files_set_1 (list[str]): The list of log files for the high reward history.
         log_files_set_2 (list[str]): The list of log files for the low reward history.
         prompt (str): The prompt to be used for the analysis. Variables {num_agents}, 
-            {trajectories_set_1}, and {trajectories_set_2} will be provided.
+            {trajectories_set_1}, and {trajectories_set_2} will be provided. The prompt instruct 
+            the LLM to use "-INSTRUCTION-" to separate instructions.
         output_file (str): The file to output the analysis to.
     """
 
@@ -158,50 +159,18 @@ def execute_analysis(
     _messages = [
         {
             "role": "system",
-            "content": f"""
-                You are part of a study on Sequential Social Dilemmas. The rules of the game are as 
-                follows: In a 2D grid, "@" are walls, "O" are orchard tiles, "A" are apples, and 
-                "." is land. Stepping on an apple will collect it and earn you points. Apples spawn 
-                only on orchard tiles and when next to other apples. If there are no apples 
-                remaining, no more will spawn. 
-            """.strip()
+            "content": dedent(f"""
+                You are in a 2D grid with walls ("@"), orchards ("O"), apples ("A"), and land 
+                ("."). Collecting apples earns points, and apples only regrow on orchard tiles if 
+                nearby apples remain. The more apples near an empty orchard, the faster new apples 
+                grow. If too few apples are left, the chance of new ones appearing decreases 
+                significantly. Players can move freely without affecting the respawn rate or 
+                blocking each other.
+            """.strip())
         },
-        { "role": "system", "content": "Answer the user's question." },
+        { "role": "system", "content": "You are a helpful assistant. Answer the user's question." },
         { "role": "user", "content": _prompt }
     ]
-
-    response = _model.chat.completions.create(
-        model = "gpt-4o-mini-2024-07-18",
-        messages = _messages,
-        temperature = 0.5,
-        max_tokens = 1024,
-        timeout = 5,
-        stop = (),
-    ).choices[0].message.content
-
-    # Split the response into individual instructions
-    instructions = response.split("---INSTRUCTION---")
-    instructions = [instr.strip() for instr in instructions if instr.strip()]
-
-    # Ensure we have the correct number of instructions
-    if len(instructions) != num_agents:
-        raise ValueError(f"Expected {num_agents} instructions, but got {len(instructions)}")
-    
-    # LLM should know about its previous response
-    _messages.append({ "role": "assistant", "content": response })
-    _messages.append({
-        "role": "user",
-        "content": f"""
-            For each of the instructions you provided, explain why you came up with that instruction.
-            
-            Use the following format, with each instruction separated by '---EXPLANATION---':
-            AGENT 1 should follow my instruction because [explanation 1]
-            ---EXPLANATION---
-            ...
-            ---EXPLANATION---
-            AGENT {num_agents} should follow my instruction because [explanation {num_agents}]
-        """.strip()
-    })
 
     response = _model.chat.completions.create(
         model = "gpt-4o-mini-2024-07-18",
@@ -212,13 +181,50 @@ def execute_analysis(
         stop = (),
     ).choices[0].message.content
 
-    # Split the response into individual explanations
-    explanations = response.split("---EXPLANATION---")
-    explanations = [expl.strip() for expl in explanations if expl.strip()]
+    # Split the response into individual instructions
+    instructions = response.split("-INSTRUCTION-")
+    instructions = [instr.strip() for instr in instructions if instr.strip()]
 
-    # Ensure we have the correct number of explanations
-    if len(explanations) != num_agents:
-        raise ValueError(f"Expected {num_agents} explanations, but got {len(explanations)}")
+    # Ensure we have the correct number of instructions
+    if len(instructions) != num_agents:
+        raise ValueError(f"Expected {num_agents} instructions, but got {len(instructions)}")
+    
+    # LLM should know about its previous response
+    _messages.append({ "role": "assistant", "content": response })
+    # _messages.append({
+    #     "role": "user",
+    #     "content": f"""
+    #         For each of the instructions you provided, explain why you came up with that 
+    #         instruction. Remember, that you were asked to provide strategies to achieve HIGH TOTAL
+    #         REWARD, not LOW TOTAL REWARD, especially considering the differences in TOTAL REWARD 
+    #         between the RESPAWNING trajectories and the NON-RESPAWNING trajectories, and analyse 
+    #         the effect of how, when, and if apples respawn on TOTAL REWARD.
+            
+    #         Use the following format, with each instruction separated by '-EXPLANATION-':
+    #         AGENT 1 should follow my instruction because [explanation 1]
+    #         -EXPLANATION-
+    #         ...
+    #         -EXPLANATION-
+    #         AGENT {num_agents} should follow my instruction because [explanation {num_agents}]
+    #     """.strip()
+    # })
+
+    # response = _model.chat.completions.create(
+    #     model = "gpt-4o-mini-2024-07-18",
+    #     messages = _messages,
+    #     temperature = 0.5,
+    #     max_tokens = 1024,
+    #     timeout = 10,
+    #     stop = (),
+    # ).choices[0].message.content
+
+    # # Split the response into individual explanations
+    # explanations = response.split("-EXPLANATION-")
+    # explanations = [expl.strip() for expl in explanations if expl.strip()]
+
+    # # Ensure we have the correct number of explanations
+    # if len(explanations) != num_agents:
+    #     raise ValueError(f"Expected {num_agents} explanations, but got {len(explanations)}")
 
     with open(output_file, "w") as file:
         json.dump(
@@ -227,67 +233,68 @@ def execute_analysis(
                 "log_files_set_2": log_files_set_2,
                 "prompt": prompt,
                 "analysis": instructions,
-                "explanations": explanations,
-                "messages": _messages + [{ "role": "assistant", "content": explanations }]
+                # "explanations": explanations,
+                "messages": _messages # + [{ "role": "assistant", "content": explanations }]
             },
             file
         )
 
 
 if __name__ == "__main__":
-    # execute_experiment(
-    #     map = HarvestGame.parse_map([
-    #         "@@@@@@@@@@",
-    #         "@.OO.OOOO@",
-    #         "@OOOOOOOO@",
-    #         "@OOOOOOOO@",
-    #         "@.OO.OOOO@",
-    #         "@@@@@@@@@@",
-    #     ]),
-    #     spawn_points = [(1, 1), (1, 4), (4, 1), (4, 4)],
-    #     seed = ord('A'),
-    #     player_num = 4,
-    #     player_goal = "To maximise your own points.",
-    #     output_file = "expts/4-4x8MO-Original-12-A-F4.json", 
-    #     probability_func = PROBABILITY_FUNCS["original"], 
-    #     desired_apple_num = 12, 
-    #     round_limit = 50,
-    #     feedback_file = "expts/Analysis-4.json"
-    # )
-
-    execute_analysis(
-        log_files_set_1 = ["expts/4-4x8MO-Original-12-A-2.json"],
-        log_files_set_2 = ["expts/4-4x8MO-Original-12-A-F0.9-2.json"],
-        prompt = """
-            You will be given a list of (AGENT, OBSERVATION, ACTION, REWARD) quadruples collected 
-            from {num_agents} agents playing the Harvest game. Each OBSERVATION is a list of 
-            coordinates of apples that the AGENT can see, and each ACTION describes the ACTION of 
-            that AGENT performed given OBSERVATION. ACTIONs are in the form '(x, y) -> (u, v)', 
-            indicating movement from '(x,y)' to '(u,v)'. The trajectories are separated into 
-            RESPAWNING and NON-RESPAWNING examples, where apples respawn and do not respawn 
-            respectively.    
-        
-            RESPAWNING trajectories
-            {trajectories_set_1}
-
-            NON-RESPAWNING trajectories
-            {trajectories_set_2}
-
-            Define TOTAL REWARD as the summation of all the agents' reward. Output exactly 
-            {num_agents} language instructions that best summarise the strategies that each AGENT 
-            should follow to receive HIGH TOTAL REWARD in the RESPAWNING setting, not LOW TOTAL 
-            REWARD. Agents should prioritise HIGH TOTAL REWARD and NOT HIGH INDIVIDUAL REWARD. You 
-            should compare the TOTAL REWARD differences between the RESPAWN trajectories and 
-            NON-RESPAWNING trajectories, and analyzing the effect of respawning rule to the TOTAL 
-            REWARD. Your instructions should assume agents are in a RESPAWNING situation, where 
-            apples respawn according to the rules of the game.
-
-            Use the following format, with each instruction separated by '---INSTRUCTION---':
-            AGENT 1 should [instruction 1]
-            ---INSTRUCTION---
-            ...
-            ---INSTRUCTION---
-            AGENT {num_agents} should [instruction {num_agents}]
-        """.strip(),
-        output_file = "expts/Analysis-6.json",
+    execute_experiment(
+        map = HarvestGame.parse_map([
+            "@@@@@@@@@@",
+            "@.OO.OOOO@",
+            "@OOOOOOOO@",
+            "@OOOOOOOO@",
+            "@.OO.OOOO@",
+            "@@@@@@@@@@",
+        ]),
+        spawn_points = [(1, 1), (1, 4), (4, 1), (4, 4)],
+        seed = ord('A'),
+        player_num = 4,
+        player_goal = "To maximise your own points.",
+        output_file = "expts/4-4x8MO-Increased-12-A-F12-2.json", 
+        probability_func = PROBABILITY_FUNCS["increased"], 
+        desired_apple_num = 12, 
+        round_limit = 50,
+        feedback_file = "expts/Analysis-12.json"
     )
+
+    # Do another one
+    # Do same without feedback
+    # Repeat all four with "increased" functions
+
+    # execute_analysis(
+    #     log_files_set_1 = ["expts/4-4x8MO-Original-12-A-F0.9-4.json", "expts/4-4x8MO-Original-12-A-F0.9-3.json"],
+    #     log_files_set_2 = ["expts/4-4x8MO-Zero-12-A-1.json"],
+    #     prompt = """
+    #         You will receive a list of (AGENT, OBSERVATION, ACTION, REWARD) sets from {num_agents} 
+    #         agents playing the Harvest game. Each OBSERVATION shows the coordinates of apples 
+    #         visible to the agent, and each ACTION represents the movement the agent made, 
+    #         written as '(x, y) -> (u, v)'. The data is split into two types: RESPAWNING, where 
+    #         apples regenerate based on proximity to other apples, as described above in the rules; 
+    #         and NON-RESPAWNING, where apples never grow back.
+
+    #         In RESPAWNING trajectories: {trajectories_set_1}
+
+    #         In NON-RESPAWNING trajectories: {trajectories_set_2}
+
+    #         TOTAL REWARD is the combined reward of all agents over the entire game. Your task is to 
+    #         create {num_agents} language instructions summarising the best strategies for each 
+    #         agent to achieve a HIGH TOTAL REWARD. Compare how TOTAL REWARD differs between 
+    #         RESPAWNING and NON-RESPAWNING scenarios. Assume the agents are in a RESPAWNING setting 
+    #         where apples grow back as described. The optimal strategy is to balance the rate at 
+    #         which agents consume apples with the rate at which apples grow back. Generally, agents
+    #         should consume apples at a slower rate, to allow for more apples to grow back.
+
+    #         Use this format, with each instruction separated by '-INSTRUCTION-': 
+    #         AGENT 1 should [instruction 1] 
+    #         -INSTRUCTION- 
+    #         AGENT 2 should [instruction 2] 
+    #         ... 
+    #         -INSTRUCTION- 
+    #         AGENT {num_agents} should [instruction {num_agents}]
+    #     """.strip(),
+    #     output_file = "expts/Analysis-13.json",
+    # )

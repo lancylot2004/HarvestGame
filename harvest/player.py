@@ -40,13 +40,14 @@ class HarvestPlayer:
         self._base_messages = [
             {
                 "role": "system",
-                "content": f"""
-                    You are part of a study on Sequential Social Dilemmas. You are playing a game of
-                    "Harvest" as a player named {self.name}. The rules of the game are as follows:
-                    In a 2D grid, "@" are walls, "O" are orchard tiles, "A" are apples, and "." is 
-                    land. Stepping on an apple will collect it and earn you points. Apples spawn 
-                    only on orchard tiles and when next to other apples. If there are no apples 
-                    remaining, no more will spawn. 
+                "content": """
+                    You are part of a study on Sequential Social Dilemmas. The rules of the game 
+                    are as follows: In a 2D grid, "@" are walls, "O" are orchard tiles, "A" are 
+                    apples, and "." is land. Stepping on an apple will collect it and earn you 
+                    points. Apples will respawn on orchard "O" tiles, if and only if there are 
+                    other apples "A" nearby. Hence, if all apples are collected, no more will ever 
+                    respawn. The probability of an apple spawning is higher if there are more 
+                    apples nearby. Players can move freely and are never blocked by each other.
                 """
             },
             {
@@ -59,8 +60,9 @@ class HarvestPlayer:
                     "(x, y)", where the origin of the map is the top-left corner.
                 """
             },
-            { "role": "system", "content": f"Your goal is: {goal}" },
+            { "role": "system", "content": f"You are playing as {self.name}. Your goal is: {goal}" },
         ]
+
         if feedback is not None:
             self._base_messages.append({ 
                 "role": "system", 
